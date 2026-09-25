@@ -143,7 +143,18 @@ router.post('/refresh', (req: Request, res: Response) => {
       permissions: user.permissions,
     });
 
-    res.json({ accessToken, refreshToken: newRefreshToken });
+    res.json({
+      accessToken,
+      refreshToken: newRefreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
+        department: user.department,
+        stateCode: user.stateCode,
+      },
+    });
   } catch {
     res.status(401).json({ error: 'UNAUTHORIZED', message: 'Invalid refresh token', statusCode: 401 });
   }

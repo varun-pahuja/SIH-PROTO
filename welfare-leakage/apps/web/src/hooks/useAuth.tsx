@@ -11,6 +11,31 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// Single-flight: StrictMode double-mounts the effect, and concurrent refreshes
+// with the same token race against rotation (second call 401s → forced logout).
+let sessionPromise: Promise<User | null> | null = null;
+
+function restoreSession(): Promise<User | null> {
+  if (sessionPromise) return sessionPromise;
+  const refreshToken = localStorage.getItem('refreshToken');
+  if (!refreshToken) return Promise.resolve(null);
+  sessionPromise = api
+    .post<AuthResponse>('/auth/refresh', { refreshToken })
+    .then(({ data }) => {
+      setAccessToken(data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      return data.user;
+    })
+    .catch(() => {
+      localStorage.removeItem('refreshToken');
+      return null;
+    })
+    .finally(() => {
+      sessionPromise = null;
+    });
+  return sessionPromise;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,24 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUnauthorizedHandler(logout);
 
-    const init = async () => {
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const { data } = await api.post<AuthResponse>('/auth/refresh', { refreshToken });
-        setAccessToken(data.accessToken);
-        localStorage.setItem('refreshToken', data.refreshToken);
-        setUser(data.user);
-      } catch {
-        localStorage.removeItem('refreshToken');
-      } finally {
-        setLoading(false);
-      }
+    let cancelled = false;
+    restoreSession().then((u) => {
+      if (cancelled) return;
+      if (u) setUser(u);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
     };
-    init();
   }, [logout]);
 
   const login = useCallback(async (email: string, password: string): Promise<User> => {
